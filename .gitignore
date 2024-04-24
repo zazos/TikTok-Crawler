@@ -1,4 +1,6 @@
-venv/
-__pycache__/
-*.pyc
-.DS_Store
+# Ignore everything
+*
+
+# But not these files...
+!.gitignore
+!*.py
