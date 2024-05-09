@@ -13,6 +13,8 @@ from fake_useragent import UserAgent
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 import traceback
+from selenium.webdriver.common.keys import Keys
+
 
 # user agent rotation
 ua = UserAgent()
@@ -52,6 +54,7 @@ def get_driver_with_random_user_agent():
     options.add_argument(f'user-agent={user_agent}')
     options.add_argument('--mute-audio')
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver.set_script_timeout(30)
     return driver
 
 def check_user_agent():
@@ -97,51 +100,72 @@ def manage_request_rate(request_count, request_threshold):
     return request_count
     
         
+
 def scrape_fyp():
     driver = get_driver_with_random_user_agent()
-    # load_cookies(driver, 'cookies/cookies.txt')
     video_data = []
-    seen_containers = set() # keep track of seen containers to avoid duplicates
+    seen_containers = set()  # keep track of seen containers to avoid duplicates
     request_count = 0
     request_threshold = 10
     
     try:
         wait = WebDriverWait(driver, 45)
         driver.get('https://www.tiktok.com/foryou')
-        
-        while len(video_data) < 25:
-            # Scroll to the bottom of the page to load more videos
-            action = ActionChains(driver)
-            action.send_keys(Keys.END).perform()
-            action.reset_actions()
-            human_like_delay()
+
+        last_height = driver.execute_script("return document.body.scrollHeight")  # Get the initial page height
+        attempts = 0  # To limit infinite scrolling if no new content appears
+
+        # while len(video_data) < 30:
+        while len(video_data) >=0:
+            new_height = last_height + 500  # Set new height for each scroll increment
+            driver.execute_script(f"window.scrollTo(0, {new_height});")  # Scroll down to new height
+            print("Scrolled incrementally to new height.")
+            time.sleep(2)  # Short wait to allow page to load more content
             
-            wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@data-e2e='recommend-list-item-container']")))
+            new_page_height = driver.execute_script("return document.body.scrollHeight")
+            if new_page_height == last_height:  # Check if the bottom of the page has been reached
+                attempts += 1
+                if attempts > 3:  # Attempt to scroll up to 3 times if no new content loads
+                    print("No new content loaded after several attempts. Ending scrape.")
+                    break
+            else:
+                attempts = 0  # Reset attempts counter if new content is loaded
+            
+            last_height = new_page_height
+
+            human_like_delay()
+
             soup = BeautifulSoup(driver.page_source, 'lxml')
             containers = soup.find_all('div', {'data-e2e': 'recommend-list-item-container'})
+            new_containers = 0
             
             for container in containers:
-                # Generate a unique identifier for each container (e.g., based on its content)
-                container_id = hash(str(container))
-                if container_id not in seen_containers:
-                    seen_containers.add(container_id)
+                video_id = extract_video_id(container)
+                
+                if video_id not in seen_containers:
+                    seen_containers.add(video_id)
                     video_info = extract_tiktok_info(container)
                     video_data.append(video_info)
-            request_count = manage_request_rate(request_count, request_threshold)
+                    new_containers += 1
             
-            if len(video_data) >= 25:
-                break
+            print(f"New containers found after scroll: {new_containers}")
+            request_count = manage_request_rate(request_count, request_threshold)
             print(f"Collected data for {len(video_data)} videos so far.")
 
-            
     except Exception as e:
-        print(f"ERROR: ")
+        print("ERROR: ")
         traceback.print_exc()
     finally:
-        # save_cookies(driver, 'cookies/cookies.txt')
         driver.quit()
         
     return video_data
+
+def extract_video_id(container):
+    link = container.find('a', href=True)
+    if link:
+        return link['href'].split('/')[-1]
+    return hash(str(container))  # Fallback to using a hash of the container as ID
+
 
 
 engagement_metrics_per_video = scrape_fyp()
