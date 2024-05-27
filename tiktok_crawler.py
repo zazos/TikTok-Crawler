@@ -14,12 +14,13 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 import traceback
 from selenium.webdriver.common.keys import Keys
-
+import pandas as pd
 
 # user agent rotation
 ua = UserAgent()
 user_agent = ua.random
 USER_AGENTS = [ua.random for _ in range(10)]
+PARQUET_FILE_PATH = 'tiktok_data.parquet'
 
 def save_cookies(driver, path):
     if not os.path.exists(os.path.dirname(path)):
@@ -101,12 +102,14 @@ def manage_request_rate(request_count, request_threshold):
     
         
 
-def scrape_fyp():
+def scrape_fyp(max_duration=5):
     driver = get_driver_with_random_user_agent()
     video_data = []
     seen_containers = set()  # keep track of seen containers to avoid duplicates
     request_count = 0
     request_threshold = 10
+
+    end_time = time.time() + max_duration * 60  # Calculate end time based on the specified duration
     
     try:
         wait = WebDriverWait(driver, 45)
@@ -116,7 +119,7 @@ def scrape_fyp():
         attempts = 0  # To limit infinite scrolling if no new content appears
 
         # while len(video_data) < 30:
-        while len(video_data) >=0:
+        while time.time() < end_time:
             new_height = last_height + 500  # Set new height for each scroll increment
             driver.execute_script(f"window.scrollTo(0, {new_height});")  # Scroll down to new height
             print("Scrolled incrementally to new height.")
@@ -166,11 +169,41 @@ def extract_video_id(container):
         return link['href'].split('/')[-1]
     return hash(str(container))  # Fallback to using a hash of the container as ID
 
+# engagement_metrics_per_video = scrape_fyp()
+# for video in engagement_metrics_per_video:
+#     print(f"Hashtags: {video.get('hashtags')}")
+#     print(f"Likes: {video.get('likes')}")
+#     print(f"Comments: {video.get('comments')}")
+#     print(f"Shares: {video.get('shares')}\n")
 
 
-engagement_metrics_per_video = scrape_fyp()
-for video in engagement_metrics_per_video:
-    print(f"Hashtags: {video.get('hashtags')}")
-    print(f"Likes: {video.get('likes')}")
-    print(f"Comments: {video.get('comments')}")
-    print(f"Shares: {video.get('shares')}\n")
+def load_existing_data(file_path):
+    if os.path.exists(file_path):
+        return pd.read_parquet(file_path)
+    return pd.DataFrame()
+
+def save_data(data, file_path):
+    df_new = pd.DataFrame(data)
+    df_existing = load_existing_data(file_path)
+    df_combined = pd.concat([df_existing, df_new])
+    # df_combined = pd.concat([df_existing, df_new]).drop_duplicates().reset_index(drop=True)
+    df_combined.to_parquet(file_path, index=False)
+
+def main_loop(max_iterations=10, delay_between_iterations=60):
+    iteration = 0
+    while iteration < max_iterations:
+        print(f"Starting iteration {iteration + 1} of {max_iterations}.")
+        engagement_metrics_per_video = scrape_fyp()
+        for video in engagement_metrics_per_video:
+            print(f"Hashtags: {video.get('hashtags')}")
+            print(f"Likes: {video.get('likes')}")
+            print(f"Comments: {video.get('comments')}")
+            print(f"Shares: {video.get('shares')}\n")
+        save_data(engagement_metrics_per_video, PARQUET_FILE_PATH)
+        iteration += 1
+        if iteration < max_iterations:
+            print(f"Iteration {iteration} completed. Waiting for {delay_between_iterations} seconds before next iteration.")
+            time.sleep(delay_between_iterations)
+
+if __name__ == "__main__":
+    main_loop()
