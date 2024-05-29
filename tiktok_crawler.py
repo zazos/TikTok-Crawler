@@ -102,24 +102,23 @@ def manage_request_rate(request_count, request_threshold):
     
         
 
-def scrape_fyp(max_duration=5):
+def scrape_fyp():
     driver = get_driver_with_random_user_agent()
     video_data = []
     seen_containers = set()  # keep track of seen containers to avoid duplicates
     request_count = 0
     request_threshold = 10
-
-    end_time = time.time() + max_duration * 60  # Calculate end time based on the specified duration
     
     try:
-        wait = WebDriverWait(driver, 45)
         driver.get('https://www.tiktok.com/foryou')
+        
+        wait = WebDriverWait(driver, 45)
+        wait.until(EC.presence_of_element_located((By.XPATH, "//div[@data-e2e='recommend-list-item-container']")))
 
         last_height = driver.execute_script("return document.body.scrollHeight")  # Get the initial page height
         attempts = 0  # To limit infinite scrolling if no new content appears
 
-        # while len(video_data) < 30:
-        while time.time() < end_time:
+        while True:
             new_height = last_height + 500  # Set new height for each scroll increment
             driver.execute_script(f"window.scrollTo(0, {new_height});")  # Scroll down to new height
             print("Scrolled incrementally to new height.")
@@ -169,14 +168,6 @@ def extract_video_id(container):
         return link['href'].split('/')[-1]
     return hash(str(container))  # Fallback to using a hash of the container as ID
 
-# engagement_metrics_per_video = scrape_fyp()
-# for video in engagement_metrics_per_video:
-#     print(f"Hashtags: {video.get('hashtags')}")
-#     print(f"Likes: {video.get('likes')}")
-#     print(f"Comments: {video.get('comments')}")
-#     print(f"Shares: {video.get('shares')}\n")
-
-
 def load_existing_data(file_path):
     if os.path.exists(file_path):
         return pd.read_parquet(file_path)
@@ -189,21 +180,25 @@ def save_data(data, file_path):
     # df_combined = pd.concat([df_existing, df_new]).drop_duplicates().reset_index(drop=True)
     df_combined.to_parquet(file_path, index=False)
 
-def main_loop(max_iterations=10, delay_between_iterations=60):
-    iteration = 0
-    while iteration < max_iterations:
-        print(f"Starting iteration {iteration + 1} of {max_iterations}.")
-        engagement_metrics_per_video = scrape_fyp()
-        for video in engagement_metrics_per_video:
-            print(f"Hashtags: {video.get('hashtags')}")
-            print(f"Likes: {video.get('likes')}")
-            print(f"Comments: {video.get('comments')}")
-            print(f"Shares: {video.get('shares')}\n")
-        save_data(engagement_metrics_per_video, PARQUET_FILE_PATH)
-        iteration += 1
-        if iteration < max_iterations:
+def main_loop(delay_between_iterations=60):
+    try:
+        iteration = 0
+        while True:
+            print(f"Starting iteration {iteration + 1}.")
+            engagement_metrics_per_video = scrape_fyp()
+            for video in engagement_metrics_per_video:
+                print(f"Hashtags: {video.get('hashtags')}")
+                print(f"Likes: {video.get('likes')}")
+                print(f"Comments: {video.get('comments')}")
+                print(f"Shares: {video.get('shares')}\n")
+            save_data(engagement_metrics_per_video, PARQUET_FILE_PATH)
+            iteration += 1
             print(f"Iteration {iteration} completed. Waiting for {delay_between_iterations} seconds before next iteration.")
             time.sleep(delay_between_iterations)
+    except KeyboardInterrupt:
+        print("Interrupted by user. Saving collected data...")
+        save_data(engagement_metrics_per_video, PARQUET_FILE_PATH)
+        print("Data saved. Exiting.")
 
 if __name__ == "__main__":
     main_loop()
